@@ -2212,6 +2212,10 @@ static TriangleMesh create_mesh(const std::string& type_name, const BoundingBoxf
         // Centered around 0, half the sphere below the print bed, half above.
         // The sphere has the same volume as the box above.
         mesh = make_sphere(0.62 * side, PI / 18);
+    else if (type_name == "Seam-Sphere")
+        // Centered around 0, half the sphere below the print bed, half above.
+        // The sphere has the same volume as the box above.
+        mesh = make_sphere(0.62 * (side * 0.1), PI / 18);
     else if (type_name == "Slab")
         // Sitting on the print bed, left front front corner at (0, 0).
         mesh = make_cube(bb.size().x() * 1.5, bb.size().y() * 1.5, bb.size().z() * 0.5);
@@ -2249,10 +2253,13 @@ void ObjectList::load_generic_subobject(const std::string& type_name, const Mode
     // Bounding box of the selected instance in world coordinate system including the translation, without modifiers.
     BoundingBoxf3 instance_bb = model_object.instance_bounding_box(instance_idx);
 
-    if(type == ModelVolumeType::SEAM_POSITION)
+    TriangleMesh mesh;
+    if(type == ModelVolumeType::SEAM_POSITION) {
         model_object.config.set_key_value("seam_position", new ConfigOptionEnum<SeamPosition>(spCustom));
-
-    TriangleMesh mesh = create_mesh(type_name, instance_bb);
+        mesh = create_mesh("Seam-Sphere", instance_bb);
+    } else {
+        mesh = create_mesh(type_name, instance_bb);
+    }
     
 	// Mesh will be centered when loading.
     ModelVolume *new_volume = model_object.add_volume(std::move(mesh));

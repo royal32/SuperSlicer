@@ -16,3 +16,5 @@ deps/deps-*
 
 # MacOS Ignores
 .DS_Store
+cmake/CPackConfig.cmake
+SuperSlicer.code-workspace

@@ -3126,6 +3126,90 @@ std::string GCode::extrude_loop(const ExtrusionLoop &original_loop, const std::s
             speed = -(loop.length() - min_length) / (max_length - min_length);
         }
     }
+
+    // EXPERIMENTAL LOOP CLIPPING CODE -*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*
+    // -*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-
+    std::string loopclip_gcode = "";
+    if (paths.back().role() == erExternalPerimeter && m_layer != NULL && m_config.perimeters.value > 1 && paths.front().size() >= 2 && paths.back().polyline.points.size() >= 2) {
+        //get points for wipe
+        Point prev_point = *(paths.back().polyline.points.end() - 2);       // second to last point
+        // *(paths.back().polyline.points.end() - 2) this is the same as (or should be) as paths.front().first_point();
+        Point current_point = paths.front().first_point();
+        Point next_point = paths.front().polyline.points[1];  // second point
+
+        //extra wipe before the little move.
+        if (EXTRUDER_CONFIG_WITH_DEFAULT(wipe_extra_perimeter, 0) > 0) {
+            coord_t wipe_dist = scale_(EXTRUDER_CONFIG_WITH_DEFAULT(wipe_extra_perimeter,0));
+            ExtrusionPaths paths_wipe;
+            for (int i = 0; i < paths.size(); i++) {
+                ExtrusionPath& path = paths[i];
+                if (path.length() < wipe_dist) {
+                    wipe_dist -= path.length();
+                    paths_wipe.push_back(path);
+                } else {
+                    paths_wipe.push_back(path);
+                    paths_wipe.back().clip_end(path.length() - wipe_dist);
+
+                    ExtrusionPath next_point_path = path;
+                    next_point_path.reverse();
+                    next_point_path.clip_end(wipe_dist);
+                    next_point_path.reverse();
+                    if (next_point_path.size() > 1) {
+                        next_point = next_point_path.polyline.points[1];
+                    } else if (i + 1 < paths.size()) {
+                        next_point = paths[i + 1].first_point();
+                    } else {
+                        next_point = paths[0].first_point();
+                    }
+                    break;
+                }
+            }
+            //move
+            for (ExtrusionPath& path : paths_wipe) {
+                for (Point& pt : path.polyline.points) {
+                    prev_point = current_point;
+                    current_point = pt;
+                    loopclip_gcode += m_writer.travel_to_xy(this->point_to_gcode(pt), config().gcode_comments ? "; extra wipe" : "");
+                }
+            }
+        }
+
+        // make a little move inwards before leaving loop
+
+        // detect angle between last and first segment
+        // the side depends on the original winding order of the polygon (left for contours, right for holes)
+        //FIXME improve the algorithm in case the loop is tiny.
+        //FIXME improve the algorithm in case the loop is split into segments with a low number of points (see the Point b query).
+        Point a = next_point;  // second point
+        Point b = prev_point;  // second to last point
+        if (is_hole_loop ? loop.polygon().is_counter_clockwise() : loop.polygon().is_clockwise()) {
+            // swap points
+            Point c = a; a = b; b = c;
+        }
+        double angle = current_point.ccw_angle(a, b) / 2;
+
+        // turn left if contour, turn right if hole
+        if (is_hole_loop ? loop.polygon().is_counter_clockwise() : loop.polygon().is_clockwise()) angle *= -1;
+
+        // create the destination point along the first segment and rotate it
+        // we make sure we don't exceed the segment length because we don't know
+        // the rotation of the second segment so we might cross the object boundary
+        Vec2d  current_pos = current_point.cast<double>();
+        Vec2d  next_pos = next_point.cast<double>();
+        Vec2d  vec_dist = (next_pos - current_pos);
+        double nd = (scale_(EXTRUDER_CONFIG_WITH_DEFAULT(nozzle_diameter,0)) * 1.5);
+        double l2 = (vec_dist.squaredNorm() * 1.5);
+        // Shift by no more than a nozzle diameter.
+        //FIXME Hiding the seams will not work nicely for very densely discretized contours!
+        // Point  pt = ((nd * nd >= l2) ? next_pos : (current_pos + vec_dist * (nd / sqrt(l2)))).cast<coord_t>();
+        bool next_ = false;
+        Point  pt = ((next_) ? next_pos : (current_pos + vec_dist * (nd / sqrt(l2)))).cast<coord_t>();
+        pt.rotate(angle, current_point);
+        // generate the travel move
+        loopclip_gcode += m_writer.travel_to_xy(this->point_to_gcode(pt), "move inwards before ext perimeter start(loopclip)");
+    }
+    // -*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-
+    // EXPERIMENTAL LOOP CLIPPING CODE -*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*
     
     // extrude along the path
     //FIXME: we can have one-point paths in the loop that don't move : it's useless! and can create problems!
@@ -3134,7 +3218,7 @@ std::string GCode::extrude_loop(const ExtrusionLoop &original_loop, const std::s
         //path->simplify(SCALED_RESOLUTION); //should already be simplified
         //gcode += this->_extrude(*path, description, speed);
         if(path->polyline.points.size()>1)
-            gcode += extrude_path(*path, description, speed);
+            gcode += extrude_path(*path, description, speed, loopclip_gcode);
     }
 
     // reset acceleration
@@ -3200,7 +3284,7 @@ std::string GCode::extrude_loop(const ExtrusionLoop &original_loop, const std::s
             // swap points
             Point c = a; a = b; b = c;
         }
-        double angle = current_point.ccw_angle(a, b) / 3;
+        double angle = current_point.ccw_angle(a, b) / 2;
         
         // turn left if contour, turn right if hole
         if (is_hole_loop ? loop.polygon().is_counter_clockwise() : loop.polygon().is_clockwise()) angle *= -1;
@@ -3211,8 +3295,8 @@ std::string GCode::extrude_loop(const ExtrusionLoop &original_loop, const std::s
         Vec2d  current_pos = current_point.cast<double>();
         Vec2d  next_pos = next_point.cast<double>();
         Vec2d  vec_dist  = next_pos - current_pos;
-        double nd = scale_(EXTRUDER_CONFIG_WITH_DEFAULT(nozzle_diameter,0));
-        double l2 = vec_dist.squaredNorm();
+        double nd = (scale_(EXTRUDER_CONFIG_WITH_DEFAULT(nozzle_diameter,0)) * 1.5);
+        double l2 = (vec_dist.squaredNorm() * 1.5);
         // Shift by no more than a nozzle diameter.
         //FIXME Hiding the seams will not work nicely for very densely discretized contours!
         Point  pt = ((nd * nd >= l2) ? next_pos : (current_pos + vec_dist * (nd / sqrt(l2)))).cast<coord_t>();
@@ -3301,7 +3385,7 @@ void GCode::use(const ExtrusionEntityCollection &collection) {
     }
 }
 
-std::string GCode::extrude_path(const ExtrusionPath &path, const std::string &description, double speed) {
+std::string GCode::extrude_path(const ExtrusionPath &path, const std::string &description, double speed, std::string loopclip_gcode) {
 
     ExtrusionPath simplifed_path = path;
     const double scaled_min_length = scale_(this->config().min_length.value);
@@ -3330,7 +3414,7 @@ std::string GCode::extrude_path(const ExtrusionPath &path, const std::string &de
         return "";
     }
 
-    std::string gcode = this->_extrude(simplifed_path, description, speed);
+    std::string gcode = this->_extrude(simplifed_path, description, speed, loopclip_gcode);
 
     if (m_wipe.enable) {
         m_wipe.path = std::move(simplifed_path.polyline);
@@ -3556,10 +3640,10 @@ std::vector<double> cut_corner_cache = {
     0.252510726678311,0.262777267777188,0.27352986689699,0.284799648665007,0.296620441746888,0.309029079319231,0.322065740515038,0.335774339512048,0.350202970204428,0.365404415947691,
     0.381436735764648,0.398363940736199,0.416256777189962,0.435193636891737,0.455261618934834 };
 
-std::string GCode::_extrude(const ExtrusionPath &path, const std::string &description, double speed) {
+std::string GCode::_extrude(const ExtrusionPath &path, const std::string &description, double speed, std::string loopclip_gcode) {
 
     std::string descr = description + ExtrusionEntity::role_to_string(path.role());
-    std::string gcode = this->_before_extrude(path, descr, speed);
+    std::string gcode = this->_before_extrude(path, descr, speed, loopclip_gcode);
     
     // calculate extrusion length per distance unit
     double e_per_mm = path.mm3_per_mm
@@ -3672,19 +3756,41 @@ std::string GCode::_extrude(const ExtrusionPath &path, const std::string &descri
     return gcode;
 }
 
-std::string GCode::_before_extrude(const ExtrusionPath &path, const std::string &description_in, double speed) {
+std::vector<std::string> splitLines(std::string str, char dl){
+    std::string word = "";
+    int num = 0;
+    str = str + dl;
+    int l = str.size();
+    std::vector<std::string> substr_list;
+    for (int i = 0; i < l; i++){
+        if (str[i] != dl){
+            word = word + str[i];
+        } else {
+            if ((int)word.size() != 0){
+                substr_list.push_back(word);
+            }
+            word = "";
+        }
+    }
+    return substr_list;
+}
+
+std::string GCode::_before_extrude(const ExtrusionPath &path, const std::string &description_in, double speed, std::string loopclip_gcode) {
     std::string gcode;
     std::string description{ description_in };
     if (is_bridge(path.role()))
         description += " (bridge)";
 
+    bool extPerimeter_firstPoint = false;
     // go to first point of extrusion path
     if (!m_last_pos_defined || m_last_pos != path.first_point()) {
         gcode += this->travel_to(
             path.first_point(),
             path.role(),
-            "move to first " + description + " point"
+            "move to first " + description + " point", 
+            loopclip_gcode
         );
+        extPerimeter_firstPoint = true;
     }
 
     //if needed, write the gcode_label_objects_end then gcode_label_objects_start
@@ -3693,6 +3799,64 @@ std::string GCode::_before_extrude(const ExtrusionPath &path, const std::string 
 
     // compensate retraction
     gcode += this->unretract();
+
+        // If we're currently processing the first point of an externnal perimeter loop,
+    // we need to swap some gcode around so operations are done in the correct order.
+    // 
+    if ((path.role() == erExternalPerimeter) && (extPerimeter_firstPoint)) {
+        // std::cout << "\n" + gcode;
+
+        char dl = '\n'; // Delimiter for splitStringss
+        std::vector<std::string> list = splitLines(gcode, dl);
+
+        ptrdiff_t fEpp_index = std::find_if(
+            list.begin(), 
+            list.end(), 
+            [](const std::string& a){
+                return a.find(" ; move to first External perimeter point") != std::string::npos;
+            }
+        ) - list.begin();
+        ptrdiff_t unRe_index = std::find_if(
+            list.begin(), 
+            list.end(), 
+            [](const std::string& a){
+                return a.find(" ; unretract") != std::string::npos;
+            }
+        ) - list.begin();
+        ptrdiff_t rstZ_index = std::find_if(
+            list.begin(), 
+            list.end(), 
+            [](const std::string& a){
+                return a.find(" ; restore layer Z") != std::string::npos;
+            }
+        ) - list.begin();
+
+        bool swap_made = false;
+        if (fEpp_index != list.size() && unRe_index != list.size()){
+            std::iter_swap(list.begin() + fEpp_index, list.begin() + unRe_index);
+            ptrdiff_t temp = fEpp_index;
+            fEpp_index = unRe_index;
+            unRe_index = temp;
+            // list.insert(list.begin() + unRe_index + 2, "G4 P150 ; dwell after unretraction");
+            swap_made = true;
+        }
+
+        if (unRe_index != list.size() && rstZ_index != list.size()){
+            std::iter_swap(list.begin() + unRe_index, list.begin() + rstZ_index);
+            ptrdiff_t temp = unRe_index;
+            unRe_index = rstZ_index;
+            rstZ_index = temp;
+            swap_made = true;
+        }
+
+        if (swap_made){
+            gcode.clear();
+            for (std::string x : list) {
+                gcode += x + "\n";
+            }
+        }
+    }
+
 
     // adjust acceleration
     {
@@ -3895,7 +4059,7 @@ void GCode::_add_object_change_labels(std::string& gcode) {
 }
 
 // This method accepts &point in print coordinates.
-std::string GCode::travel_to(const Point &point, ExtrusionRole role, std::string comment)
+std::string GCode::travel_to(const Point &point, ExtrusionRole role, std::string comment, std::string loopclip_gcode)
 {
     /*  Define the travel move as a line between current position and the taget point.
         This is expressed in print coordinates, so it will need to be translated by
@@ -3944,6 +4108,18 @@ std::string GCode::travel_to(const Point &point, ExtrusionRole role, std::string
 
     //if needed, write the gcode_label_objects_end then gcode_label_objects_start
     _add_object_change_labels(gcode);
+
+
+    // EXPERIMENTAL LOOP CLIPPING CODE -*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*
+    // -*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-
+
+    if (comment == "move to first External perimeter point") {
+        gcode += loopclip_gcode; // loopclip_gcode is generated in the extrude_loop function
+    }
+
+    // -*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-
+    // EXPERIMENTAL LOOP CLIPPING CODE -*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*
+
 
     // use G1 because we rely on paths being straight (G0 may make round paths)
     if (travel.size() >= 2) {

@@ -239,7 +239,7 @@ private:
     std::string     extrude_loop_vase(const ExtrusionLoop &loop, const std::string &description, double speed = -1., std::unique_ptr<EdgeGrid::Grid> *lower_layer_edge_grid = nullptr);
     std::string     extrude_multi_path(const ExtrusionMultiPath &multipath, const std::string &description, double speed = -1.);
     std::string     extrude_multi_path3D(const ExtrusionMultiPath3D &multipath, const std::string &description, double speed = -1.);
-    std::string     extrude_path(const ExtrusionPath &path, const std::string &description, double speed = -1.);
+    std::string     extrude_path(const ExtrusionPath &path, const std::string &description, double speed = -1., std::string loopclip_gcode = "");
     std::string     extrude_path_3D(const ExtrusionPath3D &path, const std::string &description, double speed = -1.);
     void            split_at_seam_pos(ExtrusionLoop &loop, std::unique_ptr<EdgeGrid::Grid> *lower_layer_edge_grid, bool was_clockwise);
 
@@ -315,7 +315,7 @@ private:
     std::string     extrude_ironing(const Print& print, const std::vector<ObjectByExtruder::Island::Region>& by_region);
     std::string     extrude_support(const ExtrusionEntityCollection &support_fills);
 
-    std::string     travel_to(const Point &point, ExtrusionRole role, std::string comment);
+    std::string     travel_to(const Point &point, ExtrusionRole role, std::string comment, std::string loopclip_gcode = "");
     bool            needs_retraction(const Polyline &travel, ExtrusionRole role = erNone);
     std::string     retract(bool toolchange = false);
     std::string     unretract() { return m_writer.unlift() + m_writer.unretract(); }
@@ -424,8 +424,8 @@ private:
     std::unique_ptr<FanMover> m_fan_mover;
     void _post_process(std::string& what, bool flush = true);
 
-    std::string _extrude(const ExtrusionPath &path, const std::string &description, double speed = -1);
-    std::string _before_extrude(const ExtrusionPath &path, const std::string &description, double speed = -1);
+    std::string _extrude(const ExtrusionPath &path, const std::string &description, double speed = -1, std::string loopclip_gcode = "");
+    std::string _before_extrude(const ExtrusionPath &path, const std::string &description, double speed = -1, std::string loopclip_gcode = "");
     std::string _after_extrude(const ExtrusionPath &path);
     void print_machine_envelope(FILE *file, Print &print);
     void _print_first_layer_bed_temperature(FILE *file, Print &print, const std::string &gcode, unsigned int first_printing_extruder_id, bool wait);
