@@ -1951,6 +1951,7 @@ MainFrame::ETabType MainFrame::selected_tab() const
                 return ETabType::PlaterGcode;
         }
     }
+    return ETabType::PlaterGcode;
 }
 
 void MainFrame::select_tab(ETabType tab /* = Any*/, bool keep_tab_type)

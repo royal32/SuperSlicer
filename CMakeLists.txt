@@ -229,7 +229,7 @@ endif()
 
 if (APPLE)
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Werror=partial-availability -Werror=unguarded-availability -Werror=unguarded-availability-new")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror=partial-availability -Werror=unguarded-availability -Werror=unguarded-availability-new")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror=partial-availability -Werror=unguarded-availability -Werror=unguarded-availability-new -Wno-inconsistent-missing-override -Wno-unused-variable -Wno-unused-function -Wno-unused-const-variable -Wno-unused-lambda-capture -Wno-c++11-narrowing")
 endif ()
 
 # Where all the bundled libraries reside?
