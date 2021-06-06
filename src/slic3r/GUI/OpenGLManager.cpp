@@ -5,6 +5,8 @@
 #include "I18N.hpp"
 #include "3DScene.hpp"
 
+#include "libslic3r/Platform.hpp"
+
 #include <GL/glew.h>
 
 #include <boost/algorithm/string/split.hpp>
@@ -262,7 +264,7 @@ bool OpenGLManager::init_gl()
         	message += _L("You may need to update your graphics card driver.");
 #ifdef _WIN32
             message += "\n";
-        	message += _L("As a workaround, you may run " SLIC3R_APP_NAME " with a software rendered 3D graphics by running prusa-slicer.exe with the --sw_renderer parameter.");
+            message += _L("As a workaround, you may run " SLIC3R_APP_NAME " with a software rendered 3D graphics by running " SLIC3R_APP_CMD ".exe with the --sw-renderer parameter.");
 #endif
         	wxMessageBox(message, wxString(SLIC3R_APP_NAME " - ") + _L("Unsupported OpenGL version"), wxOK | wxICON_ERROR);
         }
@@ -333,7 +335,13 @@ void OpenGLManager::detect_multisample(int* attribList)
 {
     int wxVersion = wxMAJOR_VERSION * 10000 + wxMINOR_VERSION * 100 + wxRELEASE_NUMBER;
     bool enable_multisample = wxVersion >= 30003;
-    s_multisample = (enable_multisample && wxGLCanvas::IsDisplaySupported(attribList)) ? EMultisampleState::Enabled : EMultisampleState::Disabled;
+    s_multisample = 
+        enable_multisample &&
+        // Disable multi-sampling on ChromeOS, as the OpenGL virtualization swaps Red/Blue channels with multi-sampling enabled,
+        // at least on some platforms.
+        platform_flavor() != PlatformFlavor::LinuxOnChromium &&
+        wxGLCanvas::IsDisplaySupported(attribList)
+        ? EMultisampleState::Enabled : EMultisampleState::Disabled;
     // Alternative method: it was working on previous version of wxWidgets but not with the latest, at least on Windows
     // s_multisample = enable_multisample && wxGLCanvas::IsExtensionSupported("WGL_ARB_multisample");
 }

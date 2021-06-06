@@ -236,7 +236,8 @@ wxPoint OG_CustomCtrl::get_pos(const Line& line, Field* field_in/* = nullptr*/)
                     break;
 
                 if (opt.opt.gui_type == "legend")
-                    h_pos += 2 * blinking_button_width;                if (field->getSizer()) {
+                    h_pos += 2 * blinking_button_width;
+                if (field->getSizer()) {
                     for (auto child : field->getSizer()->GetChildren()) {
                         if (child->IsWindow() && child->IsShown()) {
                             wxSize  sz = child->GetWindow()->GetSize();
@@ -412,6 +413,9 @@ void OG_CustomCtrl::correct_widgets_position(wxSizer* widget, const Line& line, 
 
 void OG_CustomCtrl::msw_rescale()
 {
+#ifdef __WXOSX__
+    return;
+#endif
     m_font      = wxGetApp().normal_font();
     m_em_unit   = em_unit(m_parent);
     m_v_gap     = lround(1.0 * m_em_unit);
@@ -434,7 +438,6 @@ void OG_CustomCtrl::msw_rescale()
 
 void OG_CustomCtrl::sys_color_changed()
 {
-    msw_rescale();
 }
 
 OG_CustomCtrl::CtrlLine::CtrlLine(  wxCoord         height,
@@ -537,10 +540,11 @@ void OG_CustomCtrl::CtrlLine::update_visibility(ConfigOptionMode mode)
 void OG_CustomCtrl::CtrlLine::render(wxDC& dc, wxCoord v_pos)
 {
     Field* field = ctrl->opt_group->get_field(og_line.get_options().front().opt_id);
+    int blinking_button_width = ctrl->m_bmp_blinking_sz.GetWidth() + ctrl->m_h_gap;
 
     bool suppress_hyperlinks = get_app_config()->get("suppress_hyperlinks") == "1";
     if (draw_just_act_buttons) {
-        if (field)
+        if (field && field->undo_to_sys_bitmap())
             draw_act_bmps(dc, wxPoint(0, v_pos), field->undo_to_sys_bitmap()->bmp(), field->undo_bitmap()->bmp(), field->blink());
         return;
     }
@@ -578,8 +582,12 @@ void OG_CustomCtrl::CtrlLine::render(wxDC& dc, wxCoord v_pos)
         option_set.front().opt.label.empty() &&
         option_set.front().side_widget == nullptr && og_line.get_extra_widgets().size() == 0)
     {
-        if (field && field->undo_to_sys_bitmap())
-            h_pos = draw_act_bmps(dc, wxPoint(h_pos, v_pos), field->undo_to_sys_bitmap()->bmp(), field->undo_bitmap()->bmp(), field->blink()) + ctrl->m_h_gap;
+        if (field) {
+            if (field->undo_to_sys_bitmap())
+                h_pos = draw_act_bmps(dc, wxPoint(h_pos, v_pos), field->undo_to_sys_bitmap()->bmp(), field->undo_bitmap()->bmp(), field->blink()) + ctrl->m_h_gap;
+            else
+                h_pos += 2 * blinking_button_width;
+        }
         // update width for full_width fields
         if (option_set.front().opt.full_width && field->getWindow())
             field->getWindow()->SetSize(ctrl->GetSize().x - h_pos, -1);
@@ -625,8 +633,11 @@ void OG_CustomCtrl::CtrlLine::render(wxDC& dc, wxCoord v_pos)
         //round it to next m_em_unit
         h_pos += (h_pos % ctrl->m_em_unit == 0 ) ? 0 : ctrl->m_em_unit - (h_pos % ctrl->m_em_unit);
 
-        if (field && field->undo_to_sys_bitmap()) {
-            h_pos = draw_act_bmps(dc, wxPoint(h_pos, v_pos), field->undo_to_sys_bitmap()->bmp(), field->undo_bitmap()->bmp(), field->blink(), bmp_rect_id++);
+        if (field) {
+            if(field->undo_to_sys_bitmap())
+                h_pos = draw_act_bmps(dc, wxPoint(h_pos, v_pos), field->undo_to_sys_bitmap()->bmp(), field->undo_bitmap()->bmp(), field->blink(), bmp_rect_id++);
+            else
+                h_pos += 2 * blinking_button_width;
             if (field->getSizer())
             {
                 auto children = field->getSizer()->GetChildren();

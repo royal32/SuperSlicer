@@ -96,7 +96,7 @@ namespace Slic3r {
 #endif // ENABLE_GCODE_VIEWER_DATA_CHECKING
 
     private:
-        using AxisCoords = std::array<float, 4>;
+        using AxisCoords = std::array<double, 4>;
         using ExtruderColors = std::vector<unsigned char>;
 
         enum class EUnits : unsigned char
@@ -479,6 +479,7 @@ namespace Slic3r {
         // Process the gcode contained in the file with the given filename
         // throws CanceledException through print->throw_if_canceled() (sent by the caller as callback).
         void process_file(const std::string& filename, bool apply_postprocess, std::function<void()> cancel_callback = nullptr);
+        void process_string(const std::string& gcode, std::function<void()> cancel_callback = nullptr);
 
         float get_time(PrintEstimatedTimeStatistics::ETimeMode mode) const;
         std::string get_time_dhm(PrintEstimatedTimeStatistics::ETimeMode mode) const;

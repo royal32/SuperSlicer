@@ -7,6 +7,7 @@
 #include "MainFrame.hpp"
 #include "format.hpp"
 
+#include "libslic3r/PresetBundle.hpp"
 #include "libslic3r/PrintConfig.hpp"
 
 #include <regex>
@@ -56,7 +57,7 @@ wxString double_to_string(double const value, const int max_precision /*= 8*/)
     return s;
 }
 
-wxString get_thumbnails_string(const std::vector<Vec2d>& values)
+wxString get_points_string(const std::vector<Vec2d>& values)
 {
     wxString ret_str;
 	for (size_t i = 0; i < values.size(); ++ i) {
@@ -125,7 +126,7 @@ void Field::PostInitialize()
                 case '3': { tab_id = MainFrame::ETabType::PlaterGcode; break; }
                 case '4': { tab_id = MainFrame::ETabType::PrintSettings; break; }
                 case '5': { tab_id = MainFrame::ETabType::FilamentSettings; break; }
-                case '6': { tab_id = MainFrame::ETabType::PrintSettings;     break; }
+                case '6': { tab_id = MainFrame::ETabType::PrinterSettings; break; }
 #ifdef __APPLE__
 				case 'f':
 #else /* __APPLE__ */
@@ -134,13 +135,14 @@ void Field::PostInitialize()
 				case 'F': { wxGetApp().plater()->search(false); break; }
 			    default: break;
 			    }
-			    if (tab_id < MainFrame::ETabType::Any)
-					wxGetApp().mainframe->select_tab(tab_id);
-				if (wxGetApp().mainframe->get_layout() == MainFrame::ESettingsLayout::Tabs
-					|| wxGetApp().mainframe->get_layout() == MainFrame::ESettingsLayout::Old
-					|| tab_id >= MainFrame::ETabType::PrintSettings)
-					// tab panel should be focused for correct navigation between tabs
-				    wxGetApp().tab_panel()->SetFocus();
+                if (tab_id < MainFrame::ETabType::Any) {
+                    wxGetApp().mainframe->select_tab(tab_id);
+                    if (wxGetApp().mainframe->get_layout() == MainFrame::ESettingsLayout::Tabs
+                        || wxGetApp().mainframe->get_layout() == MainFrame::ESettingsLayout::Old
+                        || tab_id >= MainFrame::ETabType::PrintSettings)
+                        // tab panel should be focused for correct navigation between tabs
+                        wxGetApp().tab_panel()->SetFocus();
+                }
 		    }
 			    
 		    evt.Skip();
@@ -328,50 +330,67 @@ void Field::get_value_by_opt_type(wxString& str, const bool check_value/* = true
                 } else if (((m_opt.sidetext.rfind("mm/s") != std::string::npos && val > m_opt.max) ||
                      (m_opt.sidetext.rfind("mm ") != std::string::npos && val > 1)) &&
                      (m_value.empty() || std::string(str.ToUTF8().data()) != boost::any_cast<std::string>(m_value)))
-            {
-                if (!check_value) {
-                    m_value.clear();
-                    break;
-                }
+                {
+                    // exceptions
+                    if (std::set<t_config_option_key>{"infill_anchor", "infill_anchor_max", "avoid_crossing_perimeters_max_detour"}.count(m_opt.opt_key) > 0) {
+                        m_value = std::string(str.ToUTF8().data());
+                        break;
+                    }
+                    if (m_opt.opt_key.find("extrusion_width") != std::string::npos || m_opt.opt_key.find("extrusion_spacing") != std::string::npos) {
+                        const DynamicPrintConfig& printer_config = wxGetApp().preset_bundle->printers.get_edited_preset().config;
+                        const std::vector<double> &nozzle_diameters = printer_config.option<ConfigOptionFloats>("nozzle_diameter")->values;
+                        double nozzle_diameter = 0;
+                        for(double diameter : nozzle_diameters)
+                            nozzle_diameter = std::max(nozzle_diameter, diameter);
+                        if (val < nozzle_diameter * 10) {
+                            m_value = std::string(str.ToUTF8().data());
+                            break;
+                        }
+                    }
 
-                bool infill_anchors = m_opt.opt_key == "infill_anchor" || m_opt.opt_key == "infill_anchor_max";
+                    if (!check_value) {
+                        m_value.clear();
+                        break;
+                    }
 
-                const std::string sidetext = m_opt.sidetext.rfind("mm/s") != std::string::npos ? "mm/s" : "mm";
-                const wxString stVal = double_to_string(val, 2);
-                const wxString msg_text = from_u8((boost::format(_utf8(L("Do you mean %s%% instead of %s %s?\n"
-                    "Select YES if you want to change this value to %s%%, \n"
-                    "or NO if you are sure that %s %s is a correct value."))) % stVal % stVal % sidetext % stVal % stVal % sidetext).str());
-                wxMessageDialog dialog(m_parent, msg_text, _(L("Parameter validation")) + ": " + m_opt_id , wxICON_WARNING | wxYES | wxNO);
-                if ((!infill_anchors || val > 100) && dialog.ShowModal() == wxID_YES) {
-                    set_value(from_u8((boost::format("%s%%") % stVal).str()), false/*true*/);
-                    str += "%%";
+                    bool infill_anchors = m_opt.opt_key == "infill_anchor" || m_opt.opt_key == "infill_anchor_max";
+
+                    const std::string sidetext = m_opt.sidetext.rfind("mm/s") != std::string::npos ? "mm/s" : "mm";
+                    const wxString stVal = double_to_string(val, 2);
+                    const wxString msg_text = from_u8((boost::format(_utf8(L("Do you mean %s%% instead of %s %s?\n"
+                        "Select YES if you want to change this value to %s%%, \n"
+                        "or NO if you are sure that %s %s is a correct value."))) % stVal % stVal % sidetext % stVal % stVal % sidetext).str());
+                    wxMessageDialog dialog(m_parent, msg_text, _(L("Parameter validation")) + ": " + m_opt_id , wxICON_WARNING | wxYES | wxNO);
+                    if ((!infill_anchors || val > 100) && dialog.ShowModal() == wxID_YES) {
+                        set_value(from_u8((boost::format("%s%%") % stVal).str()), false/*true*/);
+                        str += "%%";
+                    }
+				    else
+					    set_value(stVal, false); // it's no needed but can be helpful, when inputted value contained "," instead of "."
                 }
-				else
-					set_value(stVal, false); // it's no needed but can be helpful, when inputted value contained "," instead of "."
             }
-        }
         }
     
         m_value = std::string(str.ToUTF8().data());
-		break; }
-
+		break; 
+    }
     case coPoints: {
         std::vector<Vec2d> out_values;
         str.Replace(" ", wxEmptyString, true);
         if (!str.IsEmpty()) {
             bool invalid_val = false;
             bool out_of_range_val = false;
-            wxStringTokenizer thumbnails(str, ",");
-            while (thumbnails.HasMoreTokens()) {
-                wxString token = thumbnails.GetNextToken();
+            wxStringTokenizer points(str, ",");
+            while (points.HasMoreTokens()) {
+                wxString token = points.GetNextToken();
                 double x, y;
-                wxStringTokenizer thumbnail(token, "x");
-                if (thumbnail.HasMoreTokens()) {
-                    wxString x_str = thumbnail.GetNextToken();
-                    if (x_str.ToDouble(&x) && thumbnail.HasMoreTokens()) {
-                        wxString y_str = thumbnail.GetNextToken();
-                        if (y_str.ToDouble(&y) && !thumbnail.HasMoreTokens()) {
-                            if (0 < x && x < 1000 && 0 < y && y < 1000) {
+                wxStringTokenizer point(token, "x");
+                if (point.HasMoreTokens()) {
+                    wxString x_str = point.GetNextToken();
+                    if (x_str.ToDouble(&x) && point.HasMoreTokens()) {
+                        wxString y_str = point.GetNextToken();
+                        if (y_str.ToDouble(&y) && !point.HasMoreTokens()) {
+                            if (m_opt.min <= x && x <= m_opt.max && m_opt.min <= y && y <= m_opt.max) {
                                 out_values.push_back(Vec2d(x, y));
                                 continue;
                             }
@@ -387,7 +406,7 @@ void Field::get_value_by_opt_type(wxString& str, const bool check_value/* = true
             if (out_of_range_val) {
                 wxString text_value;
                 if (!m_value.empty())
-                    text_value = get_thumbnails_string(boost::any_cast<std::vector<Vec2d>>(m_value));
+                    text_value = get_points_string(boost::any_cast<std::vector<Vec2d>>(m_value));
                 set_value(text_value, true);
                 show_error(m_parent, _L("Input value is out of range")
                 );
@@ -395,7 +414,7 @@ void Field::get_value_by_opt_type(wxString& str, const bool check_value/* = true
             else if (invalid_val) {
                 wxString text_value;
                 if (!m_value.empty())
-                    text_value = get_thumbnails_string(boost::any_cast<std::vector<Vec2d>>(m_value));
+                    text_value = get_points_string(boost::any_cast<std::vector<Vec2d>>(m_value));
                 set_value(text_value, true);
                 show_error(m_parent, format_wxstr(_L("Invalid input format. Expected vector of dimensions in the following format: \"%1%\""),"XxY, XxY, ..." ));
             }
@@ -472,7 +491,7 @@ void TextCtrl::BUILD() {
 		break;
 	}
     case coPoints:
-        text_value = get_thumbnails_string(m_opt.get_default_value<ConfigOptionPoints>()->values);
+        text_value = get_points_string(m_opt.get_default_value<ConfigOptionPoints>()->values);
         break;
 	default:
 		break; 

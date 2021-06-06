@@ -88,6 +88,7 @@
 #include <wx/glcanvas.h>    // Needs to be last because reasons :-/
 #include "WipeTowerDialog.hpp"
 #include "libslic3r/CustomGCode.hpp"
+#include "libslic3r/Platform.hpp"
 
 using boost::optional;
 namespace fs = boost::filesystem;
@@ -1893,7 +1894,7 @@ struct Plater::priv
     bool can_reload_from_disk() const;
 
     void generate_thumbnail(ThumbnailData& data, unsigned int w, unsigned int h, bool printable_only, bool parts_only, bool show_bed, bool transparent_background);
-    void generate_thumbnails(ThumbnailsList& thumbnails, const Vec2ds& sizes, bool printable_only, bool parts_only, bool show_bed, bool transparent_background);
+    ThumbnailsList generate_thumbnails(const ThumbnailsParams& params);
 
     void msw_rescale_object_menu();
 
@@ -1978,7 +1979,7 @@ Plater::priv::priv(Plater *q, MainFrame *main_frame)
         "complete_objects_sort",
         "complete_objects_one_skirt",
         "duplicate_distance", "extruder_clearance_radius", 
-        "first_layer_extrusion_width",
+        "skirt_extrusion_width",
         "skirts", "skirt_distance", "skirt_height",
         "brim_width", "variable_layer_height", "nozzle_diameter", "single_extruder_multi_material",
         "wipe_tower", "wipe_tower_x", "wipe_tower_y", "wipe_tower_width", "wipe_tower_rotation_angle",
@@ -2001,44 +2002,7 @@ Plater::priv::priv(Plater *q, MainFrame *main_frame)
     background_process.set_fff_print(&fff_print);
     background_process.set_sla_print(&sla_print);
     background_process.set_gcode_result(&gcode_result);
-    background_process.set_thumbnail_cb([this](ThumbnailsList& thumbnails, const Vec2ds& sizes, bool printable_only, bool parts_only, bool show_bed, bool transparent_background)->bool
-        {
-            auto task = std::make_shared<std::packaged_task<void(ThumbnailsList&, const Vec2ds&, bool, bool, bool, bool)>>([this](ThumbnailsList& thumbnails, const Vec2ds& sizes, bool printable_only, bool parts_only, bool show_bed, bool transparent_background) {
-                generate_thumbnails(thumbnails, sizes, printable_only, parts_only, show_bed, transparent_background);
-                });
-
-            std::future<void> future_result = task->get_future();
-            std::shared_ptr<std::mutex> protect_bool = std::make_shared<std::mutex>();
-            std::shared_ptr<bool> is_started = std::make_shared<bool>(false);
-            std::shared_ptr<bool> cancel = std::make_shared<bool>(false);
-            wxTheApp->CallAfter([task, protect_bool, is_started, cancel, &thumbnails, &sizes, &printable_only, &parts_only, &show_bed, &transparent_background]()
-            { 
-                {
-                    std::lock_guard<std::mutex> lock(*protect_bool);
-                    if (*cancel)
-                        return;
-                    *is_started = true;
-                }
-                (*task)(thumbnails, sizes, printable_only, parts_only, show_bed, transparent_background); 
-            });
-            // can deadlock if background processing is cancelled / locked
-            // have to cancel the process if we're exiting here as the parameters will be deleted.
-            // if the process is already started, then we have to wait its end. and there is no deadlock with generate_thumbnails
-            // 2 seconds is plenty to 
-            std::future_status result = future_result.wait_for(std::chrono::seconds(2));
-            if (result == std::future_status::ready)
-                return true;
-            {
-                std::lock_guard<std::mutex> lock(*protect_bool);
-                if (*is_started) {
-                    future_result.wait();
-                    result = std::future_status::ready;
-                } else {
-                    *cancel = true;
-                }
-            }
-            return result == std::future_status::ready;
-        });
+    background_process.set_thumbnail_cb([this](const ThumbnailsParams& params) { return this->generate_thumbnails(params); });
     background_process.set_slicing_completed_event(EVT_SLICING_COMPLETED);
     background_process.set_finished_event(EVT_PROCESS_COMPLETED);
 	background_process.set_export_began_event(EVT_EXPORT_BEGAN);
@@ -2613,7 +2577,7 @@ std::vector<size_t> Plater::priv::load_model_objects(const ModelObjectPtrs &mode
     const Vec3d bed_size = Slic3r::to_3d(bed_shape.size().cast<double>(), 1.0) - 2.0 * Vec3d::Ones();
 
 #ifndef AUTOPLACEMENT_ON_LOAD
-    bool need_arrange = false;
+    // bool need_arrange = false;
 #endif /* AUTOPLACEMENT_ON_LOAD */
     bool scaled_down = false;
     std::vector<size_t> obj_idxs;
@@ -2633,7 +2597,7 @@ std::vector<size_t> Plater::priv::load_model_objects(const ModelObjectPtrs &mode
             new_instances.emplace_back(object->add_instance());
 #else /* AUTOPLACEMENT_ON_LOAD */
             // if object has no defined position(s) we need to rearrange everything after loading
-            need_arrange = true;
+            // need_arrange = true;
              // add a default instance and center object around origin
             object->center_around_origin();  // also aligns object to Z = 0
             ModelInstance* instance = object->add_instance();
@@ -3737,7 +3701,7 @@ void Plater::priv::on_slicing_update(SlicingStatusEvent &evt)
 void Plater::priv::on_slicing_completed(wxCommandEvent & evt)
 {
     notification_manager->push_slicing_complete_notification(evt.GetInt(), is_sidebar_collapsed());
-    if(wxGetApp().app_config->get("auto_switch_preview") == "1")
+    if(wxGetApp().app_config->get("auto_switch_preview") == "1" && !this->preview->can_display_gcode())
         main_frame->select_tab(MainFrame::ETabType::PlaterPreview);
     switch (this->printer_technology) {
     case ptFFF:
@@ -3795,9 +3759,8 @@ bool Plater::priv::warnings_dialog()
 	if (current_warnings.empty())
 		return true;
 	std::string text = _u8L("There are active warnings concerning sliced models:") + "\n";
-	bool empt = true;
 	for (auto const& it : current_warnings) {
-		int next_n = it.first.message.find_first_of('\n', 0);
+        size_t next_n = it.first.message.find_first_of('\n', 0);
 		text += "\n";
 		if (next_n != std::string::npos)
 			text += it.first.message.substr(0, next_n);
@@ -3884,7 +3847,9 @@ void Plater::priv::on_process_completed(SlicingProcessCompletedEvent &evt)
         // If writing to removable drive was scheduled, show notification with eject button
         if (exporting_status == ExportingStatus::EXPORTING_TO_REMOVABLE && !has_error) {
             show_action_buttons(false);
-            notification_manager->push_exporting_finished_notification(last_output_path, last_output_dir_path, true);
+            notification_manager->push_exporting_finished_notification(last_output_path, last_output_dir_path,
+                // Don't offer the "Eject" button on ChromeOS, the Linux side has no control over it.
+                platform_flavor() != PlatformFlavor::LinuxOnChromium);
             wxGetApp().removable_drive_manager()->set_exporting_finished(true);
         } else if (exporting_status == ExportingStatus::EXPORTING_TO_LOCAL && !has_error) {
             notification_manager->push_exporting_finished_notification(last_output_path, last_output_dir_path, false);
@@ -4068,17 +4033,17 @@ void Plater::priv::generate_thumbnail(ThumbnailData& data, unsigned int w, unsig
     view3D->get_canvas3d()->render_thumbnail(data, w, h, printable_only, parts_only, show_bed, transparent_background);
 }
 
-void Plater::priv::generate_thumbnails(ThumbnailsList& thumbnails, const Vec2ds& sizes, bool printable_only, bool parts_only, bool show_bed, bool transparent_background)
+ThumbnailsList Plater::priv::generate_thumbnails(const ThumbnailsParams& params)
 {
-    thumbnails.clear();
-    for (const Vec2d& size : sizes)
-    {
+    ThumbnailsList thumbnails;
+    for (const Vec2d& size : params.sizes) {
         thumbnails.push_back(ThumbnailData());
         Point isize(size); // round to ints
-        generate_thumbnail(thumbnails.back(), isize.x(), isize.y(), printable_only, parts_only, show_bed, transparent_background);
+        generate_thumbnail(thumbnails.back(), isize.x(), isize.y(), params.printable_only, params.parts_only, params.show_bed, params.transparent_background);
         if (!thumbnails.back().is_valid())
             thumbnails.pop_back();
     }
+    return thumbnails;
 }
 
 void Plater::priv::msw_rescale_object_menu()
@@ -5220,6 +5185,10 @@ bool Plater::load_files(const wxArrayString& filenames)
                 load_files(in_paths, false, true);
                 break;
             }
+            case LoadType::Unknown : {
+                assert(false);
+                break;
+            }
             }
 
             return true;
@@ -6114,7 +6083,6 @@ void Plater::force_print_bed_update()
 void Plater::on_activate()
 {
 #if defined(__linux__) || defined(_WIN32)
-    wxWindow *focus_window = wxWindow::FindFocus();
     // Activating the main frame, and no window has keyboard focus.
     // Set the keyboard focus to the visible Canvas3D.
     if (this->p->view3D->IsShown() && wxWindow::FindFocus() != this->p->view3D->get_wxglcanvas())
@@ -6396,6 +6364,7 @@ void Plater::msw_rescale()
 
 void Plater::sys_color_changed()
 {
+    p->preview->sys_color_changed();
     p->sidebar->sys_color_changed();
 
     // msw_rescale_menu updates just icons, so use it

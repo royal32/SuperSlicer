@@ -505,7 +505,7 @@ const std::vector<std::string>& Preset::print_options()
         "gap_fill_min_area",
         "gap_fill_overlap",
         "gap_fill_speed",
-        "travel_speed", "first_layer_speed", "perimeter_acceleration", "infill_acceleration",
+        "travel_speed", "travel_speed_z", "first_layer_speed", "perimeter_acceleration", "infill_acceleration",
         "bridge_acceleration", "first_layer_acceleration", "default_acceleration", 
         "duplicate_distance",
         "skirts", "skirt_distance", "skirt_height",
@@ -540,6 +540,7 @@ const std::vector<std::string>& Preset::print_options()
         "extrusion_width", 
         "first_layer_extrusion_spacing", 
         "first_layer_extrusion_width", 
+        "perimeter_round_corners",
         "perimeter_extrusion_spacing", 
         "perimeter_extrusion_width", 
         "external_perimeter_extrusion_spacing", 
@@ -940,7 +941,8 @@ void PresetCollection::load_presets(const std::string &dir_path, const std::stri
         }
     m_presets.insert(m_presets.end(), std::make_move_iterator(presets_loaded.begin()), std::make_move_iterator(presets_loaded.end()));
     std::sort(m_presets.begin() + m_num_default_presets, m_presets.end());
-    this->select_preset(first_visible_idx());
+    if(this->type() == Preset::Type::TYPE_PRINTER)
+        this->select_preset(first_visible_idx());
     if (! errors_cummulative.empty())
         throw Slic3r::RuntimeError(errors_cummulative);
 }
@@ -1328,6 +1330,8 @@ size_t PresetCollection::update_compatible_internal(const PresetWithVendorProfil
     if (opt)
         config.set_key_value("num_milling", new ConfigOptionInt((int)static_cast<const ConfigOptionFloats*>(opt)->values.size()));
     bool some_compatible = false;
+    if(m_idx_selected < m_num_default_presets && unselect_if_incompatible != PresetSelectCompatibleType::Never)
+        m_idx_selected = size_t(-1);
     for (size_t idx_preset = m_num_default_presets; idx_preset < m_presets.size(); ++ idx_preset) {
         bool    selected        = idx_preset == m_idx_selected;
         Preset &preset_selected = m_presets[idx_preset];
@@ -1397,9 +1401,10 @@ inline t_config_option_keys deep_diff(const ConfigBase &config_this, const Confi
         if (this_opt != nullptr && other_opt != nullptr && !(this_opt->is_phony() && other_opt->is_phony())
             && ((*this_opt != *other_opt) || (this_opt->is_phony() != other_opt->is_phony())))
         {
-            if (opt_key == "bed_shape" || opt_key == "thumbnails" || opt_key == "compatible_prints" || opt_key == "compatible_printers") {
+            if (opt_key == "bed_shape" || opt_key == "compatible_prints" || opt_key == "compatible_printers") {
                 // Scalar variable, or a vector variable, which is independent from number of extruders,
                 // thus the vector is presented to the user as a single input.
+                // note that thumbnails are not here becasue it has individual # entries
                 diff.emplace_back(opt_key);
             } else if (opt_key == "default_filament_profile") {
                 // Ignore this field, it is not presented to the user, therefore showing a "modified" flag for this parameter does not help.

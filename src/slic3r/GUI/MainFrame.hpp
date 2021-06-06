@@ -118,7 +118,7 @@ class MainFrame : public DPIFrame
 
     // vector of a MenuBar items changeable in respect to printer technology 
     std::vector<wxMenuItem*> m_changeable_menu_items;
-    wxMenuItem* m_layerpreview_menu_item;
+    wxMenuItem* m_layerpreview_menu_item = nullptr;
 
     wxFileHistory m_recent_projects;
 
@@ -201,6 +201,7 @@ public:
     // 0 = a plater tab, 1 = print setting, 2 = filament settign, 3 = printer setting
     void        select_tab(Tab* tab);
     void        select_tab(ETabType tab = ETabType::Any, bool keep_tab_type = false);
+    ETabType    selected_tab() const;
     void        select_view(const std::string& direction);
     // Propagate changed configuration from the Tab to the Plater and save changes to the AppConfig
     void        on_config_changed(DynamicPrintConfig* cfg) const ;

@@ -94,7 +94,7 @@ void OptionsSearcher::append_options(DynamicPrintConfig* config, Preset::Type ty
 
         int cnt = 0;
 
-        if ( (type == Preset::TYPE_SLA_MATERIAL || type == Preset::TYPE_PRINTER) && opt_key != "bed_shape" && opt_key != "thumbnails")
+        if ( (type == Preset::TYPE_SLA_MATERIAL || type == Preset::TYPE_PRINTER) && opt_key != "bed_shape")
             switch (config->option(opt_key)->type())
             {
             case coInts:	change_opt_key<ConfigOptionInts		>(opt_key, config, cnt);	break;
@@ -108,6 +108,10 @@ void OptionsSearcher::append_options(DynamicPrintConfig* config, Preset::Type ty
 
         wxString label = opt.full_label.empty() ? opt.label : opt.full_label;
 
+        if (label_override.find(opt.opt_key) != label_override.end()) {
+            label = label_override[opt.opt_key][1].empty() ? label_override[opt.opt_key][0] : label_override[opt.opt_key][1];
+        }
+
         if (cnt == 0)
             emplace(opt_key, label);
         else
@@ -117,18 +121,13 @@ void OptionsSearcher::append_options(DynamicPrintConfig* config, Preset::Type ty
     }
 }
 
-// Wrap a string with ColorMarkerStart and ColorMarkerEnd symbols
-static wxString wrap_string(const wxString& str)
-{
-    return wxString::Format("%c%s%c", ImGui::ColorMarkerStart, str, ImGui::ColorMarkerEnd);
-}
-
 // Mark a string using ColorMarkerStart and ColorMarkerEnd symbols
-static std::wstring mark_string(const std::wstring &str, const std::vector<uint16_t> &matches)
+static std::wstring mark_string(const std::wstring &str, const std::vector<uint16_t> &matches, Preset::Type type, PrinterTechnology pt)
 {
 	std::wstring out;
+    out += marker_by_type(type, pt);
 	if (matches.empty())
-		out = str;
+		out += str;
 	else {
 		out.reserve(str.size() * 2);
 		if (matches.front() > 0)
@@ -171,6 +170,26 @@ static bool fuzzy_match(const std::wstring &search_pattern, const std::wstring &
 		return false;
 }
 
+static bool strong_match(const std::wstring& search_pattern, const std::wstring& label, int& out_score, std::vector<uint16_t>& out_matches) {
+    std::wregex pattern(search_pattern, std::regex_constants::icase);
+    std::wsmatch sm;
+    out_matches.clear();
+    out_score = 0;
+    std::wstring str_search = label;
+    size_t pos = 0;
+    while(std::regex_search(str_search, sm, pattern)){
+        pos += sm.position();
+        for (size_t j = 0; j < sm.length(); ++j)
+            out_matches.push_back(pos + j);
+        out_score += std::max(1, int(30 - pos));
+        pos += sm.length();
+        str_search = sm.suffix().str();
+    }
+    if (out_score <= 0)
+        out_score = std::numeric_limits<int>::min();
+    return out_score > 0;
+}
+
 bool OptionsSearcher::search(const std::string& search, bool force/* = false*/)
 {
     if (search_line == search && !force)
@@ -181,38 +200,40 @@ bool OptionsSearcher::search(const std::string& search, bool force/* = false*/)
     bool full_list = search.empty();
     std::wstring sep = L" : ";
 
-    auto get_label = [this, &sep](const Option& opt)
+    auto get_label = [this, &sep](const Option& opt, bool marked = true)
     {
         std::wstring out;
-        out += marker_by_type(opt.type, printer_technology);
-    	const std::wstring *prev = nullptr;
-    	for (const std::wstring * const s : {
-	        view_params.category 	? &opt.category_local 		: nullptr,
-	        &opt.group_local, &opt.label_local })
-    		if (s != nullptr && (prev == nullptr || *prev != *s)) {
-      			if (out.size()>2)
-    				out += sep;
-    			out += *s;
-    			prev = s;
-    		}
-        return out;
+        if (marked)
+            out += marker_by_type(opt.type, printer_technology);
+        const std::wstring* prev = nullptr;
+        for (const std::wstring* const s : {
+            view_params.category ? &opt.category_local : nullptr,
+                & opt.group_local, & opt.label_local })
+            if (s != nullptr && (prev == nullptr || *prev != *s)) {
+                if (out.size() > 2)
+                    out += sep;
+                out += *s;
+                prev = s;
+            }
+            return out;
     };
 
-    auto get_label_english = [this, &sep](const Option& opt)
+    auto get_label_english = [this, &sep](const Option& opt, bool marked = true)
     {
         std::wstring out;
-        out += marker_by_type(opt.type, printer_technology);
-    	const std::wstring*prev = nullptr;
-    	for (const std::wstring * const s : {
-	        view_params.category 	? &opt.category 			: nullptr,
-	        &opt.group, &opt.label })
-    		if (s != nullptr && (prev == nullptr || *prev != *s)) {
-      			if (out.size()>2)
-    				out += sep;
-    			out += *s;
-    			prev = s;
-    		}
-        return out;
+        if (marked)
+            out += marker_by_type(opt.type, printer_technology);
+        const std::wstring* prev = nullptr;
+        for (const std::wstring* const s : {
+            view_params.category ? &opt.category : nullptr,
+                & opt.group, & opt.label })
+            if (s != nullptr && (prev == nullptr || *prev != *s)) {
+                if (out.size() > 2)
+                    out += sep;
+                out += *s;
+                prev = s;
+            }
+            return out;
     };
 
     auto get_tooltip = [this, &sep](const Option& opt)
@@ -234,26 +255,30 @@ bool OptionsSearcher::search(const std::string& search, bool force/* = false*/)
 
         std::wstring wsearch       = boost::nowide::widen(search);
         boost::trim_left(wsearch);
-        std::wstring label         = get_label(opt);
-        std::wstring label_english = get_label_english(opt);
+        std::wstring label         = get_label(opt, false);
+        std::wstring label_english = get_label_english(opt, false);
         int score = std::numeric_limits<int>::min();
         int score2;
         matches.clear();
-        fuzzy_match(wsearch, label, score, matches);
-        if (fuzzy_match(wsearch, opt.opt_key, score2, matches2) && score2 > score) {
+        if(view_params.exact)
+            strong_match(wsearch, label, score, matches);
+        else
+            fuzzy_match(wsearch, label, score, matches);
+
+        if ( (view_params.exact ? strong_match(wsearch, opt.opt_key, score2, matches2):fuzzy_match(wsearch, opt.opt_key, score2, matches2)) && (view_params.exact || score2 > score) ) {
         	for (fts::pos_type &pos : matches2)
         		pos += label.size() + 1;
         	label += L"(" + opt.opt_key + L")";
         	append(matches, matches2);
-        	score = score2;
+        	score = std::max(score, score2);
         }
-        if (view_params.english && fuzzy_match(wsearch, label_english, score2, matches2) && score2 > score) {
+        if (view_params.english && (view_params.exact ? strong_match(wsearch, label_english, score2, matches2) : fuzzy_match(wsearch, label_english, score2, matches2)) && score2 > score) {
         	label   = std::move(label_english);
         	matches = std::move(matches2);
         	score   = score2;
         }
-        if (score > std::numeric_limits<int>::min()) {
-		    label = mark_string(label, matches);            
+        if (score > 90/*std::numeric_limits<int>::min()*/) {
+		    label = mark_string(label, matches, opt.type, printer_technology);
             label += L"  [" + std::to_wstring(score) + L"]";// add score value
 	        std::string label_u8 = into_u8(label);
 	        std::string label_plain = label_u8;
@@ -383,13 +408,15 @@ SearchDialog::SearchDialog(OptionsSearcher* searcher)
     check_category  = new wxCheckBox(this, wxID_ANY, _L("Category"));
     if (GUI::wxGetApp().is_localized())
         check_english   = new wxCheckBox(this, wxID_ANY, _L("Search in English"));
+    check_exact = new wxCheckBox(this, wxID_ANY, _L("Exact pattern"));
 
     wxStdDialogButtonSizer* cancel_btn = this->CreateStdDialogButtonSizer(wxCANCEL);
 
     check_sizer->Add(new wxStaticText(this, wxID_ANY, _L("Use for search") + ":"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, border);
     check_sizer->Add(check_category, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, border);
     if (check_english)
-        check_sizer->Add(check_english,  0, wxALIGN_CENTER_VERTICAL | wxRIGHT, border);
+        check_sizer->Add(check_english, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, border);
+    check_sizer->Add(check_exact, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, border);
     check_sizer->AddStretchSpacer(border);
     check_sizer->Add(cancel_btn,     0, wxALIGN_CENTER_VERTICAL);
 
@@ -420,7 +447,8 @@ SearchDialog::SearchDialog(OptionsSearcher* searcher)
 
     check_category->Bind(wxEVT_CHECKBOX, &SearchDialog::OnCheck, this);
     if (check_english)
-        check_english ->Bind(wxEVT_CHECKBOX, &SearchDialog::OnCheck, this);
+        check_english->Bind(wxEVT_CHECKBOX, &SearchDialog::OnCheck, this);
+    check_exact->Bind(wxEVT_CHECKBOX, &SearchDialog::OnCheck, this);
 
 //    Bind(wxEVT_MOTION, &SearchDialog::OnMotion, this);
     Bind(wxEVT_LEFT_DOWN, &SearchDialog::OnLeftDown, this);
@@ -442,6 +470,7 @@ void SearchDialog::Popup(wxPoint position /*= wxDefaultPosition*/)
     check_category->SetValue(params.category);
     if (check_english)
         check_english->SetValue(params.english);
+    check_exact->SetValue(params.exact);
 
     this->SetPosition(position);
     this->ShowModal();
@@ -556,6 +585,7 @@ void SearchDialog::OnCheck(wxCommandEvent& event)
     if (check_english)
         params.english  = check_english->GetValue();
     params.category = check_category->GetValue();
+    params.exact = check_exact->GetValue();
 
     searcher->search();
     update_list();
