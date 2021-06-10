@@ -1980,10 +1980,14 @@ Plater::priv::priv(Plater *q, MainFrame *main_frame)
         "complete_objects_one_skirt",
         "duplicate_distance", "extruder_clearance_radius", 
         "skirt_extrusion_width",
-        "skirts", "skirt_distance", "skirt_height",
+        "first_layer_extrusion_width",
+        "perimeter_extrusion_width",
+        "extrusion_width",
+        "skirts", "skirt_distance", "skirt_height", "draft_shield",
         "brim_width", "variable_layer_height", "nozzle_diameter", "single_extruder_multi_material",
         "wipe_tower", "wipe_tower_x", "wipe_tower_y", "wipe_tower_width", "wipe_tower_rotation_angle",
-        "wipe_tower_brim",        "extruder_colour", "filament_colour", "max_print_height", "printer_model", "printer_technology",
+        "wipe_tower_brim",
+        "extruder_colour", "filament_colour", "max_print_height", "printer_model", "printer_technology",
         // These values are necessary to construct SlicingParameters by the Canvas3D variable layer height editor.
         "layer_height", "first_layer_height", "min_layer_height", "max_layer_height",
         "brim_width", "perimeters", "perimeter_extruder", "fill_density", "infill_extruder", "top_solid_layers", 
@@ -2277,16 +2281,17 @@ void Plater::priv::select_view_3D(const std::string& name)
 
 void Plater::priv::select_next_view_3D()
 {
-    for (int i = 0; i < panels.size(); i++) {
-        if (panels[i] == current_panel) {
-            if (i + 1 == panels.size()) {
-                set_current_panel(panels[0]);
-            } else {
-                set_current_panel(panels[i+1]);
-            }
-            return;
-        }
-    }
+    main_frame->next_preview_tab();
+   //for (int i = 0; i < panels.size(); i++) {
+   //     if (panels[i] == current_panel) {
+   //         if (i + 1 == panels.size()) {
+   //             set_current_panel(panels[0]);
+   //         } else {
+   //             set_current_panel(panels[i+1]);
+   //         }
+   //         return;
+   //     }
+   // }
 }
 
 void Plater::priv::collapse_sidebar(bool collapse)

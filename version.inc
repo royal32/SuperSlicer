@@ -9,9 +9,9 @@ set(SLIC3R_APP_KEY "SuperSlicer")
 set(SLIC3R_APP_CMD "superslicer")
 # versions
 set(SLIC3R_VERSION "2.3.56")
-set(SLIC3R_VERSION_FULL "2.3.56.3")
+set(SLIC3R_VERSION_FULL "2.3.56.4")
 set(SLIC3R_BUILD_ID "${SLIC3R_APP_KEY}_${SLIC3R_VERSION_FULL}+UNKNOWN")
-set(SLIC3R_RC_VERSION "2,3,56,3")
+set(SLIC3R_RC_VERSION "2,3,56,4")
 set(SLIC3R_RC_VERSION_DOTS "${SLIC3R_VERSION_FULL}")
 
 # Same as the slicer name but for gcodeviewer
@@ -25,5 +25,3 @@ set(SLIC3R_BASED_ON "a flavored version of Slic3r")
 set(SLIC3R_GITHUB "supermerill/SuperSlicer")
 # download url
 set(SLIC3R_DOWNLOAD "https://github.com/supermerill/SuperSlicer/releases")
-# string to display in the spalshscreen
-set(SLIC3R_INTRO "SuperSlicer is a skinned version of Slic3r, based on the original Slic3r by Alessandro Ranellucci & the RepRap community, and PrusaSlicer by Prusa.")

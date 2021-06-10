@@ -33,7 +33,7 @@ void CalibrationBedDialog::create_buttons(wxStdDialogButtonSizer* buttons){
 void CalibrationBedDialog::create_geometry(wxCommandEvent& event_args) {
     Plater* plat = this->main_frame->plater();
     Model& model = plat->model();
-    if (!plat->new_project("First layer calibration"))
+    if (!plat->new_project(L("First layer calibration")))
         return;
 
     bool autocenter = gui_app->app_config->get("autocenter") == "1";
@@ -143,7 +143,7 @@ void CalibrationBedDialog::create_geometry(wxCommandEvent& event_args) {
     //if(!plat->is_background_process_update_scheduled())
     //    plat->schedule_background_process();
     plat->reslice();
-    plat->select_view_3D("Preview");
+
     if (autocenter) {
         //re-enable auto-center after this calibration.
         gui_app->app_config->set("autocenter", "1");
