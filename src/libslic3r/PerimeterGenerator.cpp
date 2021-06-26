@@ -135,7 +135,7 @@ void PerimeterGenerator::process()
 
         for (surface_idx = 0; surface_idx < all_surfaces.size(); surface_idx++) {
             Surface *surface = &all_surfaces[surface_idx];
-            ExPolygons last = union_ex(surface->expolygon.simplify_p(SCALED_RESOLUTION));
+            ExPolygons last = union_ex(surface->expolygon);
             //compute our unsupported surface
             ExPolygons unsupported = diff_ex(last, *this->lower_slices, true);
             if (!unsupported.empty()) {
@@ -752,15 +752,9 @@ void PerimeterGenerator::process()
                     if (!expoly.holes.empty()) {
                         //this is a a sort of a loop
                         //try to see if it's possible to add a "perimeter"
-                        Polygons small_peri = offset(expoly.contour, -(float)(perimeter_spacing), ClipperLib::jtMiter, 3);
-                        Polygons small_holes = expoly.holes;
-                        polygons_reverse(small_holes);
-                        ExPolygons small_ex = diff_ex(small_peri, small_holes);
-                        if (small_ex.size() == 1 && !small_ex.front().holes.empty()) {
+                        ExPolygons contour_expolygon = offset_ex(expoly, -(float)(perimeter_spacing / 2), ClipperLib::jtMiter, 3);
+                        if (contour_expolygon.size() == 1 && !contour_expolygon.front().holes.empty()) {
                             //OK
-                            Polygons perimeter_line = offset(expoly.contour, -(float)(perimeter_spacing/2), ClipperLib::jtMiter, 3);
-                            if (perimeter_line.size() != 1)
-                                continue;
                             // update list & variable to let the new perimeter be taken into account
                             loop_number = contours_size;
                             if (contours_size >= contours.size()) {
@@ -768,16 +762,10 @@ void PerimeterGenerator::process()
                                 holes.emplace_back();
                             }
                             //Add the new periemter
-                            contours[contours_size].emplace_back(perimeter_line.front(), contours_size, true, has_steep_overhang);
+                            contours[contours_size].emplace_back(contour_expolygon.front().contour, contours_size, true, has_steep_overhang);
                             //create the new gapfills
-                            ExPolygon perimeter_area;
-                            perimeter_area.holes.emplace_back(small_ex.front().contour);
-                            perimeter_area.holes.front().reverse();
-                            perimeter_line = offset(perimeter_line.front(), (float)(perimeter_spacing / 2), ClipperLib::jtMiter, 3);
-                            if (perimeter_line.size() != 1) // should never happen
-                                perimeter_line = { expoly.contour };
-                            perimeter_area.contour = perimeter_line.front();
-                            ExPolygons to_add = diff_ex(expoly, perimeter_area);
+                            ExPolygons gapfill_area = offset_ex(expoly.contour, -(float)(perimeter_spacing));
+                            ExPolygons to_add = intersection_ex({ expoly }, gapfill_area);
                             //add the new gapfill
                             if (to_add.size() == 0)
                                 expoly.clear();
@@ -942,10 +930,8 @@ void PerimeterGenerator::process()
             min = std::max(min, double(Flow::new_from_spacing(EPSILON, (float)nozzle_diameter, (float)this->layer->height, false).scaled_width()));
             double max = 2.2 * perimeter_spacing;
             //remove areas that are too big (shouldn't occur...)
-            ExPolygons gaps_ex_to_test = diff_ex(
-                gaps,
-                offset2_ex(gaps, double(-max / 2), double(+max / 2)),
-                true);
+            ExPolygons too_big = offset2_ex(gaps, double(-max / 2), double(+max / 2));
+            ExPolygons gaps_ex_to_test = too_big.empty()? gaps : diff_ex(gaps,too_big,true);
             ExPolygons gaps_ex;
             const double minarea = scale_(scale_(this->config->gap_fill_min_area.get_abs_value(unscaled((double)perimeter_width)*unscaled((double)perimeter_width))));
             // check each gapfill area to see if it's printable.

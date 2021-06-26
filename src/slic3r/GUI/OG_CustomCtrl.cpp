@@ -177,8 +177,8 @@ wxPoint OG_CustomCtrl::get_pos(const Line& line, Field* field_in/* = nullptr*/)
                 if (!option.label.empty()) {
                     std::string opt_label = (option.label.empty() || option.label.back() != '_') ? option.label : option.label.substr(0, option.label.size() - 1);
                     //!            To correct translation by context have to use wxGETTEXT_IN_CONTEXT macro from wxWidget 3.1.1
-                    label = (opt_label == L_CONTEXT("Top", "Layers") || opt_label == L_CONTEXT("Bottom", "Layers")) ?
-                        _CTX(opt_label, "Layers") : _(opt_label);
+                    label = /*(opt_label == L_CONTEXT("Top", "Layers") || opt_label == L_CONTEXT("Bottom", "Layers")) ?
+                        _CTX(opt_label, "Layers") :*/ _(opt_label);
                     bool no_dots = label.empty() || option.label.back() == '_';
                     if (!no_dots)
                         label += ":";
@@ -605,8 +605,8 @@ void OG_CustomCtrl::CtrlLine::render(wxDC& dc, wxCoord v_pos)
         if (!option.label.empty()) {
             std::string opt_label = (option.label.empty() || option.label.back() != '_') ? option.label : option.label.substr(0, option.label.size() - 1);
             //!            To correct translation by context have to use wxGETTEXT_IN_CONTEXT macro from wxWidget 3.1.1
-            wxString label = (opt_label == L_CONTEXT("Top", "Layers") || opt_label == L_CONTEXT("Bottom", "Layers")) ?
-                _CTX(opt_label, "Layers") : _(opt_label);
+            wxString label = /*(opt_label == L_CONTEXT("Top", "Layers") || opt_label == L_CONTEXT("Bottom", "Layers")) ?
+                _CTX(opt_label, "Layers") :*/ _(opt_label);
             bool no_dots = label.empty() || option.label.back() == '_';
             if (!no_dots)
                 label += ":";
@@ -818,11 +818,11 @@ RememberChoiceDialog::RememberChoiceDialog(wxWindow* parent, const wxString& msg
                 return;
         wxString preferences_item = _L("Suppress to open hyperlink in browser");
         wxString msg =
-                _L(SLIC3R_APP_NAME " will remember your choice.") + "\n\n" +
+                wxString::Format(_L("%s will remember your choice."), SLIC3R_APP_NAME) + "\n\n" +
             _L("You will not be asked about it again on label hovering.") + "\n\n" +
                 format_wxstr(_L("Visit \"Preferences\" and check \"%1%\"\nto changes your choice."), preferences_item);
 
-            wxMessageDialog dialog(nullptr, msg, _L(SLIC3R_APP_NAME ": Don't ask me again"), wxOK | wxCANCEL | wxICON_INFORMATION);
+            wxMessageDialog dialog(nullptr, msg, wxString::Format(_L("%s: Don't ask me again"), SLIC3R_APP_NAME), wxOK | wxCANCEL | wxICON_INFORMATION);
             if (dialog.ShowModal() == wxID_CANCEL)
                 m_remember_choice->SetValue(false);
         });
